@@ -1,0 +1,10 @@
+{
+    "name": "pluveto/codegen",
+    "description": "php routes / api rules generator",
+    "autoload": {
+        "psr-4": {
+            "Pluveto\\CodeGen\\AutoRouter\\": "AutoRouter/"
+        },
+        "files":["functions.php"]
+    }
+}
