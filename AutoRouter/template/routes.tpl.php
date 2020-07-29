@@ -1,4 +1,5 @@
 <?= "<?php"?>
+
 declare(strict_types=1);
 /**
  * This file is part of Hyperf.
@@ -17,15 +18,12 @@ declare(strict_types=1);
 use Hyperf\HttpServer\Router\Router;
 
 
-<?php foreach($controllers as $controller): ?>
-        /**
-         * <?php echo $controller->className."\n";?>
-         */
+<?php foreach($this->controllers as $controller): ?>
+/**
+ * <?php echo $controller->className."\n";?>
+ */
 <?php foreach($controller->routes as $route): ?>
-        $router->addRoute('<?=$route->httpMethod;?>','<?=$route->httpRoute;?>', '<?=$controller->className;?>/<?=$route->functionName;?>');
+Router::addRoute('<?=$route->httpMethod;?>','<?=$route->httpRoute;?>', 'App\Controller\<?=$controller->className;?>::<?=$route->functionName;?>');
 <?php endforeach;?>
 
 <?php endforeach;?>
-        
-    }
-}

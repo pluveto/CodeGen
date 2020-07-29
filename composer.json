@@ -1,6 +1,7 @@
 {
     "name": "pluveto/codegen",
     "description": "php routes / api rules generator",
+    "license": "APACHE 2.0",
     "autoload": {
         "psr-4": {
             "Pluveto\\CodeGen\\AutoRouter\\": "AutoRouter/"

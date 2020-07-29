@@ -22,3 +22,27 @@ function var_export_format(array $expression): string
     $export = join(PHP_EOL, array_filter(["["] + $array));
     return $export;
 }
+
+/**
+ * ======= String exts ======= 
+ */
+
+function str_starts_with($haystack, $needle)
+{
+    return strncmp($haystack, $needle, strlen($needle)) === 0;
+}
+
+function str_ends_with($haystack, $needle)
+{
+    return $needle === '' || substr_compare($haystack, $needle, -strlen($needle)) === 0;
+}
+
+function str_contains($haystack, $needle)
+{
+    return (strpos($haystack, $needle) !== false);
+}
+
+function array_get_if_key_exists($array, $key, $default)
+{
+    return array_key_exists($key, $array) ? $array[$key] : $default;
+}

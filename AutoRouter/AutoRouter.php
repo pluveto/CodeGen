@@ -2,6 +2,9 @@
 
 namespace Pluveto\CodeGen\AutoRouter;
 
+use Exception;
+
+use Pluveto\CodeGen\AutoRouter\RouteParser;
 
 /**
  * This class generates router class automatically by calling `generateRouter()`
@@ -17,10 +20,14 @@ class AutoRouter
         return self::$instance ? self::$instance : self::$instance = new self();
     }
 
-    private $routerFileName;
-    private $routerTemplateFileName;
-    private $ruleFileName;
-    private $ruleTemplateFileName;
+    private string $routerFileName;
+    private string $routerTemplateFileName;
+    private string $ruleFileName;
+    private string $ruleTemplateFileName;
+    private string $scanPattern;
+
+    private string $apiFileName;
+    private string $apiTemplateFileName;
 
     public function __construct()
     {
@@ -30,6 +37,10 @@ class AutoRouter
         $this->routerTemplateFileName   = $config["routerTemplateFileName"];
         $this->ruleFileName             = $config["ruleFileName"];
         $this->ruleTemplateFileName     = $config["ruleTemplateFileName"];
+        $this->apiFileName              = $config["apiFileName"];
+        $this->apiTemplateFileName      = $config["apiTemplateFileName"];
+        $this->scanPattern              = $config["scanPattern"];
+        
 
         if (
             is_file($this->routerTemplateFileName) &&
@@ -40,19 +51,31 @@ class AutoRouter
             die();
         }
 
-        echo "routerFileName: " . $this->routerFileName . "\n";
-        echo "routerTemplateFileName: " . $this->routerTemplateFileName . "\n";
-        echo "ruleFileName: " . $this->ruleFileName . "\n";
-        echo "ruleTemplateFileName: " . $this->ruleTemplateFileName . "\n";
+        // echo "routerFileName: " . $this->routerFileName . "\n";
+        // echo "routerTemplateFileName: " . $this->routerTemplateFileName . "\n";
+        // echo "ruleFileName: " . $this->ruleFileName . "\n";
+        // echo "ruleTemplateFileName: " . $this->ruleTemplateFileName . "\n";
     }
-
+    /**元素结构
+     * controller {
+     *   className
+     *   routes{
+     *      httpMethod  
+     *      httpRoute   
+     *      functionName
+     *   }
+     * }
+     */
+    private array $controllers;
+    private array $apiRules;
+    private array $apiPerms;
     public function generateRouter()
     {
 
-        $filesToScan = rglob('App/HttpController/*.php');
+        $filesToScan = rglob($this->scanPattern);
         $classesMeta = $this->getControllerClasses($filesToScan);
 
-        [$controllers, $apiRules, $apiPerms] = $this->analyzeController($classesMeta);
+        [$this->controllers, $this->apiRules, $this->apiPerms] = $this->analyzeController($classesMeta);
 
         // Router
         ob_start();
@@ -67,6 +90,31 @@ class AutoRouter
         $result = ob_get_clean();
         file_put_contents($this->ruleFileName, $result);
         echo "\nRules generated: " . $this->ruleFileName . "\n\n";
+    }
+
+    public function generateApi()
+    {
+
+        if(!is_file($this->apiTemplateFileName)){
+            throw new Exception("Missing Api Template File Name");
+        }
+
+        $filesToScan = rglob($this->scanPattern);
+        $classesMeta = $this->getControllerClasses($filesToScan);
+
+        [$this->controllers, $this->apiRules, $this->apiPerms] = $this->analyzeController($classesMeta);
+        $oldFileContent = file_get_contents($this->apiFileName);
+        ob_start();
+        require($this->apiTemplateFileName);
+        $result = ob_get_clean();
+        if(!trim($oldFileContent)){
+            file_put_contents($this->apiFileName, $result);
+        }else{
+            $re = "/(api = {)([.\s\t\S\n\r]*)}(\/\/api)/";
+            file_put_contents($this->apiFileName, preg_replace($re,"$1".$result."$3", $oldFileContent));
+        }
+        
+        echo "\nApi generated: " . $this->apiFileName . "\n\n";
     }
 
 
@@ -91,7 +139,7 @@ class AutoRouter
                 if (str_starts_with($functionName, "__")) continue;
 
                 $comment = $function->getDocComment();
-                [$httpMethod, $httpRoute, $apiPermission, $apiRule, $apiName, $apiVersion] = $this->extractAnnotation($comment);
+                [$httpMethod, $httpRoute, $apiPermission, $apiRule, $apiName, $apiVersion, $apiEncrypted] = $this->extractAnnotation($comment);
                 $httpRoute = "/v" . $apiVersion[0] . rtrim($httpRoute, "/");
                 if (null == $httpMethod) {
                     echo "--->Skip $functionName\n";
@@ -99,16 +147,17 @@ class AutoRouter
                 }
                 echo "---> Found API: \e[1;35m" . str_pad($functionName, 18) . "\e[0m ";
                 if (is_array($apiRule) && count($apiRule)) {
-                    $apiRuleList["$className/$functionName"] = $apiRule;
+                    $apiRuleList["$httpRoute"] = $apiRule;
                 }
                 if ($apiPermission != "none") $apiPerms[] = ["name" => $apiName, "value" => $apiPermission];
-                $apiRuleList["$className/$functionName"]['__permission'] = $apiPermission;
+                $apiRuleList["$httpRoute"]['__permission'] = $apiPermission;
+                $apiRuleList["$httpRoute"]['__encrypted'] = $apiEncrypted;                
                 echo "\e[1;32m" . str_pad("[$httpMethod]", 8) . "$httpRoute\e[0m\n";
 
                 $route = new \stdClass;
-                $route->httpMethod = $httpMethod;
-                $route->httpRoute = $httpRoute;
-                $route->functionName = $functionName;
+                $route->httpMethod      = $httpMethod;
+                $route->httpRoute       = $httpRoute;
+                $route->functionName    = $functionName;
 
                 $controller->routes[] = $route;
             }
@@ -129,7 +178,9 @@ class AutoRouter
      */
     private function isControllerFileName($fileName)
     {
-        return !str_starts_with($fileName, "Base") && str_ends_with($fileName, "Controller");
+        return !str_starts_with($fileName, "Base")
+            && !str_starts_with($fileName, "Abstract")
+            &&  str_ends_with($fileName, "Controller");
     }
 
     /**
@@ -140,8 +191,8 @@ class AutoRouter
      */
     private function filePathToClassFullName($filePath)
     {
-        $filePath = str_replace("/", "\\", $filePath); // turn `App/HttpController/IndexController.php` to `App\HttpController\IndexController.php`
-        $className = "\\" . substr($filePath, 0, (strrpos($filePath, "."))); // turn `App\HttpController\IndexController.php` to `\App\HttpController\IndexController`
+        $filePath = str_replace("/", "\\", $filePath); // turn `App/Controller/IndexController.php` to `App\Controller\IndexController.php`
+        $className = "\\" . substr($filePath, 0, (strrpos($filePath, "."))); // turn `App\Controller\IndexController.php` to `\App\Controller\IndexController`
         return $className;
     }
 
@@ -276,7 +327,12 @@ class AutoRouter
 
         if ($default) {
             if ($type == "integer") $default = intval($default);
+            if ($type == "boolean"){                
+                $default = json_decode($default);
+            };
             $retBody["default"] = $default;
+        } else {
+            if ($type == "string" && !$retBody["required"]) $retBody["default"] = '';
         }
 
         /**
@@ -297,12 +353,15 @@ class AutoRouter
      */
     function extractAnnotation($comment)
     {
-        if (!str_contains($comment, "@api ")) return [null, null, null, null, null, null];
+        if (!str_contains($comment, "@api ")) {
+            return [null, null, null, null, null, null, null];
+        }
 
         $httpMethod = "";
         $httpRoute = "";
         $apiPermission = "none";
         $apiVersion = "";
+        $apiEncrypted = false;
         $apiRule = [];
         $lines = explode("\n", $comment);
         foreach ($lines as $line) {
@@ -322,6 +381,9 @@ class AutoRouter
                 $line = substr($line, strlen("@apiPermission ")); // user
                 $apiPermission = trim($line);
             }
+            if (strpos($line, "@apiEncrypted") === 0) {
+                $apiEncrypted = true;
+            }
             if (strpos($line, "@apiVersion ") === 0) {
                 $line = substr($line, strlen("@apiVersion ")); // user
                 $apiVersion = explode(".", trim($line));
@@ -336,6 +398,46 @@ class AutoRouter
             echo "\n****** Failed to find route !! ******";
             die();
         }
-        return [$httpMethod, $httpRoute, $apiPermission, $apiRule, $apiName, $apiVersion];
+        return [$httpMethod, $httpRoute, $apiPermission, $apiRule, $apiName, $apiVersion,  $apiEncrypted];
+    }
+
+    /**
+     * Get the value of apiFileName
+     */
+    public function getApiFileName()
+    {
+        return $this->apiFileName;
+    }
+
+    /**
+     * Set the value of apiFileName
+     *
+     * @return  self
+     */
+    public function setApiFileName($apiFileName)
+    {
+        $this->apiFileName = $apiFileName;
+
+        return $this;
+    }
+
+    /**
+     * Get the value of apiTemplateFileName
+     */
+    public function getApiTemplateFileName()
+    {
+        return $this->apiTemplateFileName;
+    }
+
+    /**
+     * Set the value of apiTemplateFileName
+     *
+     * @return  self
+     */
+    public function setApiTemplateFileName($apiTemplateFileName)
+    {
+        $this->apiTemplateFileName = $apiTemplateFileName;
+
+        return $this;
     }
 }

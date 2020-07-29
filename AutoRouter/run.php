@@ -1,9 +1,15 @@
 <?php
-require_once realpath( __DIR__."/../vendor/autoload.php");
+require_once realpath(__DIR__ . "/../vendor/autoload.php");
 
 use Pluveto\CodeGen\AutoRouter\AutoRouter;
 
 
-echo "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~";
+if (count($argv) == 1) {
+    AutoRouter::getInstance()->generateRouter();
+    return;
+}
 
-AutoRouter::getInstance()->generateRouter();
+if ($argv[1] == "api") {
+    AutoRouter::getInstance()->generateApi();
+    return;
+}
